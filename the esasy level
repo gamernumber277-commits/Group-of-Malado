@@ -1,0 +1,398 @@
+package games;
+
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Random;
+
+public class Games extends JPanel implements KeyListener {
+
+    // Player & Movement
+    private int x = 80, y = 80;
+    private final int BOX_SIZE = 50;
+    private int speed = 15;
+    private boolean up, down, left, right;
+    private boolean canFly = false;
+    private Timer flightTimer;
+    private int yVelocity = 0, gravity = 2;
+    private boolean isJumping = false;
+    private int jumpCount = 0;
+    private int groundY = 1300;
+
+    // Level & Score
+    private int level = 1, score = 0;
+    private int health = 3;
+    private boolean isDead = false;
+
+    // Obstacles & Spikes
+    private ArrayList<Rectangle> obstacles = new ArrayList<>();
+    private ArrayList<Boolean> platformVisible = new ArrayList<>();
+    private ArrayList<Integer> platformTimer = new ArrayList<>();
+    private ArrayList<Rectangle> spikes = new ArrayList<>();
+    private ArrayList<Integer> spikeDirections = new ArrayList<>();
+    private int spikeSpeed = 10;
+    private Rectangle collectible;
+
+    // Timers
+    private Timer countdownTimer;
+    private int timeLeft = 60;
+
+    // Quiz variables
+    private boolean showLevelQuestion = false;
+    private String levelQuestion = "";
+    private boolean isMathTrack = true; // true=Math, false=Science
+    private double answer = 0;
+    private Random random = new Random();
+    private JButton[] options = new JButton[4];
+
+    private String[] mathLevels = {
+            "Addition", "Subtraction", "Multiplication", "Division",
+            "Multiplication + Addition", "Power of Sum", "Advanced Addition",
+            "Intermediate Multiplication", "Complex Division", "Math Challenge"
+    };
+
+    private String[] scienceLevels = {
+            "Velocity", "Atomic Mass", "Light Distance", "Acceleration",
+            "Physics Level 5", "Chemistry Level 6", "Physics Level 7",
+            "Science Level 8", "Advanced Physics", "Science Challenge"
+    };
+
+    private HashSet<String> usedQuestions = new HashSet<>(); // Track used questions per session
+
+    // New buttons
+    private JButton restartButton;
+    private JButton menuButton;
+
+    public Games() {
+        setLayout(null); // Needed for absolute button placement
+        setFocusable(true);
+        addKeyListener(this);
+
+        // Ask user track
+        selectTrack();
+
+        // Initialize quiz option buttons
+        for (int i = 0; i < 4; i++) {
+            options[i] = new JButton();
+            options[i].setBounds(400 + (i % 2) * 200, 150 + (i / 2) * 60, 180, 50); // position options
+            options[i].setVisible(false);
+            int idx = i;
+            options[i].addActionListener(e -> checkAnswer(idx));
+            add(options[i]);
+        }
+
+        // Initialize Restart Button
+        restartButton = new JButton("Restart");
+        restartButton.setBounds(1200, 50, 150, 50);
+        restartButton.addActionListener(e -> restartGame());
+        add(restartButton);
+
+        // Initialize Menu Button
+        menuButton = new JButton("Menu");
+        menuButton.setBounds(1200, 120, 150, 50);
+        menuButton.addActionListener(e -> openMenu());
+        add(menuButton);
+
+        // Platformer main timer
+        Timer timer = new Timer(20, e -> moveBox());
+        timer.start();
+
+        // Countdown timer
+        countdownTimer = new Timer(1000, e -> {
+            if (timeLeft > 0) timeLeft--;
+            else handleTimeOut();
+            repaint();
+        });
+
+        loadLevel(level);
+        countdownTimer.start();
+    }
+
+    // --- Track selection ---
+    private void selectTrack() {
+        SwingUtilities.invokeLater(() -> {
+            Object[] choices = {"Math", "Science"};
+            String track = (String) JOptionPane.showInputDialog(
+                    null,
+                    "Choose your track:",
+                    "Select Track",
+                    JOptionPane.QUESTION_MESSAGE,
+                    null,
+                    choices,
+                    choices[0]
+            );
+            if (track == null) System.exit(0);
+            isMathTrack = track.equals("Math");
+        });
+    }
+
+    // --- Level loading ---
+    private void loadLevel(int lvl) {
+        // Reset player
+        x = 80; y = 80; yVelocity = 0; isJumping = false; jumpCount = 0; canFly = false;
+        if (flightTimer != null) flightTimer.stop();
+
+        showLevelQuestion = true;
+        levelQuestion = "Answer the quiz to proceed!";
+        timeLeft = 60;
+        countdownTimer.restart();
+
+        obstacles.clear(); platformVisible.clear(); platformTimer.clear();
+        spikes.clear(); spikeDirections.clear();
+        collectible = new Rectangle(600, 400, 30, 30); // collectible for flying
+        spikeSpeed = 10 + lvl * 2;
+
+        // Example obstacles & spikes
+        obstacles.add(new Rectangle(100, 500, 400, 50));
+        obstacles.add(new Rectangle(700, 600, 300, 50));
+        platformVisible.add(true); platformVisible.add(true);
+        platformTimer.add(0); platformTimer.add(0);
+
+        spikes.add(new Rectangle(500, 450, 50, 50));
+        spikeDirections.add(1);
+
+        // Clear button texts for new level
+        for (JButton b : options) b.setText("");
+    }
+
+    // --- Question generation ---
+    private void generateQuestion() {
+        if (isMathTrack) generateMath(level);
+        else generateScience(level);
+        generateOptions();
+    }
+
+    private void generateMath(int lvl) {
+        String q; int a, b;
+        switch (lvl) {
+            case 1: a=random.nextInt(20)+1; b=random.nextInt(20)+1; q=a+" + "+b+" = ?"; answer=a+b; break;
+            case 2: a=random.nextInt(20)+1; b=random.nextInt(20)+1; q=a+" - "+b+" = ?"; answer=a-b; break;
+            case 3: a=random.nextInt(10)+1; b=random.nextInt(10)+1; q=a+" * "+b+" = ?"; answer=a*b; break;
+            case 4: a=random.nextInt(20)+1; b=random.nextInt(10)+1; q=a+" / "+b+" = ?"; answer=(double)a/b; break;
+            case 5: a=random.nextInt(10)+1; b=random.nextInt(10)+1; q=a+" + "+b+" + "+(a*b)+" = ?"; answer=a+b+(a*b); break;
+            case 6: a=random.nextInt(50)+1; b=random.nextInt(50)+1; q="Find "+a+" - "+b+" + "+(a*b/2)+" = ?"; answer=a-b+(a*b/2); break;
+            case 7: a=random.nextInt(10)+1; b=random.nextInt(10)+1; q="Square of "+a+" + "+b+" = ?"; answer=(a*a)+b; break;
+            case 8: a=random.nextInt(15)+1; b=random.nextInt(15)+1; q="Multiply sum: ("+a+" + "+b+") * 2 = ?"; answer=(a+b)*2; break;
+            case 9: a=random.nextInt(12)+1; b=random.nextInt(12)+1; q="Divide product: ("+a+" * "+b+") / 3 = ?"; answer=(a*b)/3.0; break;
+            case 10: a=random.nextInt(20)+1; b=random.nextInt(20)+1; q="Final Math Challenge: "+a+" + "+b+" * "+a+" = ?"; answer=a+b*a; break;
+            default: a=random.nextInt(10)+1; q="Add "+a+" + "+a+" = ?"; answer=a+a;
+        }
+        if (usedQuestions.contains(q)) { generateMath(lvl); return; }
+        usedQuestions.add(q); levelQuestion=q;
+    }
+
+    private void generateScience(int lvl) {
+        String q;
+        switch(lvl) {
+            case 1: int v=random.nextInt(16)+5; int t=random.nextInt(10)+1; q="A car moves at "+v+" m/s for "+t+" s. Distance = ?"; answer=v*t; break;
+            case 2: String[] elements={"H","O","C"}; int[] masses={1,16,12}; int idx=random.nextInt(elements.length); int count=random.nextInt(5)+1; q="Atomic mass of "+count+elements[idx]+" = ?"; answer=masses[idx]*count; break;
+            case 3: long c=300_000_000; int t3=random.nextInt(10)+1; q="Light travels for "+t3+" s. Distance = ?"; answer=c*t3; break;
+            case 4: int F=random.nextInt(46)+5; int m=random.nextInt(10)+1; q="Force = "+F+" N, Mass = "+m+" kg. Acceleration = ?"; answer=(double)F/m; break;
+            case 5: int a5=random.nextInt(10)+1; int b5=random.nextInt(10)+1; q="Science challenge: "+a5+" + "+b5+" = ?"; answer=a5+b5; break;
+            case 6: int t6=random.nextInt(20)+1; int v6=random.nextInt(20)+1; q="Velocity: distance "+t6+" m, time "+v6+" s. Speed = ?"; answer=(double)t6/v6; break;
+            case 7: int e7=random.nextInt(10)+1; int m7=random.nextInt(10)+1; q="Energy = 1/2 * "+m7+" * "+e7+"^2 = ?"; answer=0.5*m7*e7*e7; break;
+            case 8: int f8=random.nextInt(10)+1; int d8=random.nextInt(10)+1; q="Force = mass "+f8+" kg * accel "+d8+" m/s^2. Result = ?"; answer=f8*d8; break;
+            case 9: int a9=random.nextInt(10)+1; int b9=random.nextInt(10)+1; q="Final Science: "+a9+" + "+b9+" * 2 = ?"; answer=a9+b9*2; break;
+            case 10: int c10=random.nextInt(20)+1; int d10=random.nextInt(20)+1; q="Advanced Science: "+c10+" * "+d10+" + "+c10+" = ?"; answer=c10*d10+c10; break;
+            default: int d=random.nextInt(10)+1; q="Add "+d+" + "+d+" = ?"; answer=d+d;
+        }
+        if (usedQuestions.contains(q)) { generateScience(lvl); return; }
+        usedQuestions.add(q); levelQuestion=q;
+    }
+
+    private void generateOptions() {
+        int correctIndex = random.nextInt(4);
+        HashSet<Double> used = new HashSet<>();
+        used.add(answer);
+
+        for (int i = 0; i < 4; i++) {
+            if (i == correctIndex) {
+                options[i].setText(formatAnswer(answer));
+            } else {
+                double wrong;
+                do { wrong = answer + (random.nextInt(21)-10); } while (used.contains(wrong));
+                used.add(wrong);
+                options[i].setText(formatAnswer(wrong));
+            }
+            options[i].setVisible(true);
+        }
+    }
+
+    private String formatAnswer(double val) {
+        if (val == (int) val) return String.valueOf((int) val);
+        return String.format("%.2f", val);
+    }
+
+    private void checkAnswer(int idx) {
+        double selected = Double.parseDouble(options[idx].getText());
+        if (Math.abs(selected - answer) < 0.01) {
+            JOptionPane.showMessageDialog(this, "✅ Correct!");
+            score++;
+        } else {
+            JOptionPane.showMessageDialog(this, "❌ Wrong! Correct: " + formatAnswer(answer));
+            score--; health--;
+            if (health <= 0) isDead = true;
+        }
+
+        for (JButton b : options) b.setVisible(false);
+
+        if (!isDead) {
+            level++;
+            if ((isMathTrack && level > mathLevels.length) || (!isMathTrack && level > scienceLevels.length)) {
+                JOptionPane.showMessageDialog(this, "🎉 You finished all levels! Final Score: " + score);
+                restartGame();
+            } else loadLevel(level);
+        }
+    }
+
+    private void handleTimeOut() {
+        health--;
+        if (health <= 0) isDead = true;
+        else { JOptionPane.showMessageDialog(this, "Time's up! -1 health"); x=80; y=80; jumpCount=0; yVelocity=0; }
+        timeLeft=60;
+        countdownTimer.restart();
+    }
+
+    private void restartGame() {
+        countdownTimer.stop();
+        if (flightTimer != null) flightTimer.stop();
+        level = 1; score = 0; health = 3; isDead = false; usedQuestions.clear();
+        x = 80; y = 80; yVelocity=0; jumpCount=0; canFly=false;
+        loadLevel(level);
+        countdownTimer.start();
+    }
+
+    private void openMenu() {
+        countdownTimer.stop();
+        if (flightTimer != null) flightTimer.stop();
+        SwingUtilities.invokeLater(() -> {
+            selectTrack();
+            restartGame();
+        });
+    }
+
+    // --- Movement and collision ---
+    private void moveBox() {
+        if (isDead) { repaint(); return; }
+
+        int nextX=x, nextY=y;
+        if(left) nextX-=speed;
+        if(right) nextX+=speed;
+        if(canFly){ if(up) nextY-=speed; if(down) nextY+=speed; }
+        else{
+            if(isJumping){ yVelocity+=gravity; nextY+=yVelocity; }
+            else if(y<groundY){ yVelocity+=gravity; nextY+=yVelocity; isJumping=true; }
+        }
+
+        Rectangle nextPlayerX=new Rectangle(nextX,y,BOX_SIZE,BOX_SIZE);
+        boolean horizontalCollision=false;
+        for(int i=0;i<obstacles.size();i++)
+            if(platformVisible.get(i) && nextPlayerX.intersects(obstacles.get(i))) horizontalCollision=true;
+        if(!horizontalCollision) x=nextX;
+
+        if(!canFly){
+            Rectangle nextPlayerY=new Rectangle(x,nextY,BOX_SIZE,BOX_SIZE);
+            boolean verticalCollision=false;
+            for(int i=0;i<obstacles.size();i++){
+                if(!platformVisible.get(i)) continue;
+                Rectangle o=obstacles.get(i);
+                if(nextPlayerY.intersects(o)){
+                    verticalCollision=true;
+                    if(y+BOX_SIZE<=o.y){ y=o.y-BOX_SIZE; isJumping=false; yVelocity=0; jumpCount=0; }
+                    else if(y>=o.y+o.height){ y=o.y+o.height; yVelocity=0; }
+                    break;
+                }
+            }
+            if(!verticalCollision) y=nextY;
+            if(y>=groundY){ y=groundY; isJumping=false; yVelocity=0; jumpCount=0; }
+        } else y=nextY;
+
+        for(int i=0;i<platformTimer.size();i++){
+            int t=platformTimer.get(i)+20;
+            if(t>=20000){ platformVisible.set(i,!platformVisible.get(i)); t=0; }
+            platformTimer.set(i,t);
+        }
+
+        if(collectible!=null && new Rectangle(x,y,BOX_SIZE,BOX_SIZE).intersects(collectible)){
+            canFly=true; collectible=null;
+            if(flightTimer!=null) flightTimer.stop();
+            flightTimer=new Timer(10000,e->{ canFly=false; ((Timer)e.getSource()).stop(); });
+            flightTimer.setRepeats(false); flightTimer.start();
+        }
+
+        for(int i=0;i<spikes.size();i++){
+            if(new Rectangle(x,y,BOX_SIZE,BOX_SIZE).intersects(spikes.get(i))){
+                health--; if(health<=0) isDead=true; else{ x=80; y=80; jumpCount=0; yVelocity=0; }
+            }
+        }
+
+        for(int i=0;i<spikes.size();i++){
+            Rectangle spike=spikes.get(i);
+            int dir=spikeDirections.get(i);
+            spike.x+=spikeSpeed*dir;
+            if(spike.x<0 || spike.x+spike.width>getWidth()) spikeDirections.set(i,dir*-1);
+        }
+
+        if(showLevelQuestion && options[0].getText().isEmpty()) generateQuestion();
+
+        repaint();
+    }
+
+    @Override
+    protected void paintComponent(Graphics g){
+        super.paintComponent(g);
+        g.setColor(Color.RED); g.fillRect(x,y,BOX_SIZE,BOX_SIZE);
+
+        g.setColor(Color.GRAY);
+        for(int i=0;i<obstacles.size();i++)
+            if(platformVisible.get(i)){ Rectangle r=obstacles.get(i); g.fillRect(r.x,r.y,r.width,r.height); }
+
+        g.setColor(Color.BLUE); for(Rectangle s:spikes) g.fillRect(s.x,s.y,s.width,s.height);
+
+        if(collectible!=null){ g.setColor(Color.YELLOW); g.fillOval(collectible.x,collectible.y,collectible.width,collectible.height); }
+
+        g.setColor(Color.BLACK); g.setFont(new Font("Arial",Font.BOLD,20));
+        g.drawString("Score: "+score,20,50);
+        g.drawString("Health: "+health,20,80);
+        g.drawString("Level: "+level,20,110);
+        g.drawString("Time: "+timeLeft,20,140);
+
+        if(showLevelQuestion) g.drawString(levelQuestion,400,100);
+
+        if(isDead){ g.setColor(Color.RED); g.setFont(new Font("Arial",Font.BOLD,60)); g.drawString("GAME OVER",500,300); }
+    }
+
+    @Override
+    public void keyPressed(KeyEvent e){
+        int key=e.getKeyCode();
+        if(key==KeyEvent.VK_W) up=true;
+        if(key==KeyEvent.VK_S) down=true;
+        if(key==KeyEvent.VK_A) left=true;
+        if(key==KeyEvent.VK_D) right=true;
+        if(key==KeyEvent.VK_SPACE && !isJumping){ isJumping=true; yVelocity=-25; jumpCount++; }
+    }
+
+    @Override
+    public void keyReleased(KeyEvent e){
+        int key=e.getKeyCode();
+        if(key==KeyEvent.VK_W) up=false;
+        if(key==KeyEvent.VK_S) down=false;
+        if(key==KeyEvent.VK_A) left=false;
+        if(key==KeyEvent.VK_D) right=false;
+    }
+
+    @Override
+    public void keyTyped(KeyEvent e){}
+
+    // --- Main method ---
+    public static void main(String[] args){
+        JFrame frame=new JFrame("Platformer + Quiz Game");
+        Games game=new Games();
+        frame.add(game);
+        frame.setSize(1400,1400);
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setVisible(true);
+    }
+}
